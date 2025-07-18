@@ -105,7 +105,7 @@ const AIToolsPage = () => {
               className="relative aspect-square rounded-2xl overflow-hidden border border-gray-700"
             >
               <Image
-                src="/ai-demo-before.jpg"
+                src="https://www.befunky.com/images/prismic/391d50e3-1268-45e1-aaaa-3cfe6f2fb90d_hero-blur-image-2.jpg?auto=avif,webp&format=jpg&width=896"
                 alt="Before AI Enhancement"
                 fill
                 className="object-cover"
@@ -120,7 +120,7 @@ const AIToolsPage = () => {
               className="relative aspect-square rounded-2xl overflow-hidden border border-purple-500"
             >
               <Image
-                src="/ai-demo-after.jpg"
+                src="https://sdmntpreastus.oaiusercontent.com/files/00000000-30ec-61f9-be42-767505262689/raw?se=2025-05-16T00%3A07%3A47Z&sp=r&sv=2024-08-04&sr=b&scid=00000000-0000-0000-0000-000000000000&skoid=31bc9c1a-c7e0-460a-8671-bf4a3c419305&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2025-05-15T22%3A05%3A21Z&ske=2025-05-16T22%3A05%3A21Z&sks=b&skv=2024-08-04&sig=Epe5jMFJ2QuGfL427KpL3ibJiqAwkII2DKHP2vaj42U%3D"
                 alt="After AI Enhancement"
                 fill
                 className="object-cover"
@@ -134,7 +134,7 @@ const AIToolsPage = () => {
       </div>
 
       {/* Pricing Section */}
-      <PricingSection features={features}/>
+      <PricingSection features={features} />
       {/* CTA Section */}
       <div className="bg-gradient-to-br from-purple-900 to-gray-900 py-20 text-center">
         <h2 className="text-3xl md:text-4xl font-bold mb-6">
