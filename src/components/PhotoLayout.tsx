@@ -12,12 +12,19 @@ import {
   FiImage,
   FiList,
   FiMoreHorizontal,
-  FiPlus,
+ 
   FiSearch,
   FiUpload,
+  FiDownload,
+  FiTrash2,
 } from "react-icons/fi";
 import { useUploadGroupImages } from "@/api/upload";
+import { useRouter } from "next/navigation";
 import { useDropzone } from "react-dropzone";
+import {  fetchImageBlob,} from "@/api/images/images";
+import JSZip from "jszip";
+import { toast } from "react-toastify";
+import {  UseMutationResult,  } from "@tanstack/react-query";
 
 interface Photo {
   id: string;
@@ -30,19 +37,31 @@ interface Photo {
 
 interface PhotoLayoutProps {
   photos: Photo[];
-  groupId?: number | null; // Keep for upload functionality
+  groupId?: number | null;
   title?: string;
+  deleteSingleMutation: UseMutationResult<void, Error, { photoId: number; groupId?: number }, unknown>;
+
+  deleteBulkMutation: UseMutationResult<
+    { success: number[]; failed: Array<{ id: number; error: string }> },
+    Error,
+    { photoIds: number[]; groupId?: number },
+    unknown
+  >;
 }
 
-const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title = "Your Photos" }) => {
-  console.log("Photos received by PhotoLayout:", photos);
+
+const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title = "Your Photos" , deleteBulkMutation,deleteSingleMutation}) => {
+  const router = useRouter();
+  
   const uploadMutation = useUploadGroupImages();
-  const [viewMode, setViewMode] = useState<"grid" | "list" | "masonry">(
-    "masonry"
-  );
+  const [viewMode, setViewMode] = useState<"grid" | "list" | "masonry">("masonry");
   const [selectedPhotos, setSelectedPhotos] = useState<string[]>([]);
   const [activeMenuPhoto, setActiveMenuPhoto] = useState<string | null>(null);
   const [isDesktop, setIsDesktop] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  
 
   const onDrop = (acceptedFiles: File[]) => {
     if (groupId) {
@@ -74,9 +93,237 @@ const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title =
     setActiveMenuPhoto((prev) => (prev === id ? null : id));
   };
 
+  // Handle single photo deletion (mobile)
+  const handleSinglePhotoDelete = async (photoId: string) => {
+    try {
+      const id = parseInt(photoId);
+      
+      toast.info("Deleting photo...");
+      
+      await deleteSingleMutation.mutateAsync({ 
+        photoId: id, 
+        groupId: groupId || undefined 
+      });
+      
+      toast.success("Photo deleted successfully!");
+    } catch (error) {
+      console.error("Failed to delete photo:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to delete photo");
+    }
+  };
+
+  // Updated mobile photo action handler
   const handlePhotoAction = (action: string, id: string) => {
-    console.log(`${action} photo:`, id);
+    if (action === 'edit') {
+      router.push(`/photo/${id}`);
+    } else if (action === 'download') {
+      handleSinglePhotoDownload(id);
+    } else if (action === 'delete') {
+      handleSinglePhotoDelete(id);
+    }
     setActiveMenuPhoto(null);
+  };
+
+  // Handle bulk deletion (desktop)
+  const handleBulkDelete = async () => {
+    if (selectedPhotos.length === 0) {
+      toast.error("No photos selected for deletion.");
+      return;
+    }
+
+    // Show confirmation dialog
+    const confirmed = window.confirm(
+      `Are you sure you want to delete ${selectedPhotos.length} photo${selectedPhotos.length > 1 ? 's' : ''}? This action cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    setIsDeleting(true);
+
+    try {
+      toast.info(`Deleting ${selectedPhotos.length} photo${selectedPhotos.length > 1 ? 's' : ''}...`);
+      
+      const photoIds = selectedPhotos.map(id => parseInt(id));
+      const result = await deleteBulkMutation.mutateAsync({ 
+        photoIds, 
+        groupId: groupId || undefined 
+      });
+
+      // Handle results
+      if (result.success.length > 0) {
+        toast.success(`Successfully deleted ${result.success.length} photo${result.success.length > 1 ? 's' : ''}!`);
+      }
+
+      if (result.failed.length > 0) {
+        toast.error(`Failed to delete ${result.failed.length} photo${result.failed.length > 1 ? 's' : ''}. Please try again.`);
+        
+        // Log detailed errors for debugging
+        result.failed.forEach(({ id, error }) => {
+          console.error(`Failed to delete photo ${id}:`, error);
+        });
+      }
+
+      // Clear selection regardless of partial failures
+      setSelectedPhotos([]);
+
+    } catch (error) {
+      console.error("Bulk delete failed:", error);
+      toast.error("An unexpected error occurred during deletion.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Separate function for single photo download
+  const handleSinglePhotoDownload = async (photoId: string) => {
+    setIsDownloading(true);
+    
+    try {
+      toast.info("Preparing download...");
+      const photo = photos.find(p => p.id === photoId);
+
+      if (!photo) {
+        toast.error(`Photo with ID ${photoId} not found.`);
+        return;
+      }
+
+      const blob = await fetchImageBlob(photo.image_url);
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = photo.original_filename || `photo_${photoId}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+      
+      toast.success("Download started!");
+    } catch (error) {
+      console.error("Failed to download photo:", error);
+      toast.error("An error occurred while downloading the photo.");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleEdit = () => {
+    if (selectedPhotos.length === 1) {
+      router.push(`/photo/${selectedPhotos[0]}`);
+    }
+  };
+
+  const handleBulkDownload = async () => {
+    const selectionCount = selectedPhotos.length;
+
+    if (selectionCount === 0) {
+      toast.error("No photos selected for download.");
+      return;
+    }
+
+    setIsDownloading(true);
+
+    try {
+      // Handle single file download
+      if (selectionCount === 1) {
+        toast.info("Preparing download...");
+        const photoId = selectedPhotos[0];
+        const photo = photos.find(p => p.id === photoId);
+
+        if (!photo) {
+          toast.error(`Photo with ID ${photoId} not found.`);
+          return;
+        }
+
+        const blob = await fetchImageBlob(photo.image_url);
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = photo.original_filename || `photo_${photoId}.jpg`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+        
+        toast.success("Download started!");
+        setSelectedPhotos([]);
+        return;
+      }
+
+      // Handle bulk (zip) download
+      toast.info(`Preparing ${selectionCount} photos for download...`);
+      const zip = new JSZip();
+      const downloadPromises: Promise<void>[] = [];
+      const failedDownloads: string[] = [];
+
+      // Create download promises for all selected photos
+      selectedPhotos.forEach((photoId) => {
+        const photo = photos.find(p => p.id === photoId);
+        if (!photo) {
+          failedDownloads.push(photoId);
+          return;
+        }
+
+        const downloadPromise = fetchImageBlob(photo.image_url)
+          .then((blob) => {
+            const filename = photo.original_filename || `photo_${photoId}.jpg`;
+            // Just sanitize invalid characters, let OS handle duplicates
+            const sanitizedFilename = filename.replace(/[<>:"/\\|?*]/g, '_');
+            zip.file(sanitizedFilename, blob);
+          })
+          .catch((error) => {
+            console.error(`Failed to download photo ${photoId}:`, error);
+            failedDownloads.push(photoId);
+          });
+
+        downloadPromises.push(downloadPromise);
+      });
+
+      // Wait for all downloads to complete
+      await Promise.allSettled(downloadPromises);
+
+      // Show warnings for failed downloads
+      if (failedDownloads.length > 0) {
+        toast.warning(`${failedDownloads.length} photos failed to download and were skipped.`);
+      }
+
+      // Check if we have any files to zip
+      const fileCount = Object.keys(zip.files).length;
+      if (fileCount === 0) {
+        toast.error("No photos could be downloaded.");
+        return;
+      }
+
+      // Generate and download the zip file (no compression to preserve quality)
+      toast.info("Creating zip file...");
+      const zipBlob = await zip.generateAsync({ 
+        type: "blob",
+        compression: "STORE" // No compression to preserve original quality
+      });
+
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(zipBlob);
+      
+      // Generate a more descriptive filename
+      const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      link.download = `photos_${timestamp}_${fileCount}items.zip`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+      
+      const successCount = fileCount;
+      const message = failedDownloads.length > 0 
+        ? `Downloaded ${successCount} photos successfully. ${failedDownloads.length} failed.`
+        : `Successfully downloaded ${successCount} photos!`;
+      
+      toast.success(message);
+      setSelectedPhotos([]);
+
+    } catch (error) {
+      console.error("Bulk download failed:", error);
+      toast.error("An error occurred during the download process.");
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   const renderContent = () => {
@@ -369,10 +616,31 @@ const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title =
           <span className="text-purple-400">
             {selectedPhotos.length} selected
           </span>
+          <button
+            onClick={handleEdit}
+            disabled={selectedPhotos.length !== 1}
+            className="hover:text-purple-400 disabled:text-gray-500 disabled:cursor-not-allowed"
+          >
+            Edit
+          </button>
           <button className="hover:text-purple-400">Share</button>
-          <button className="hover:text-purple-400">Download</button>
+          <button 
+            onClick={handleBulkDownload}
+            disabled={isDownloading}
+            className="hover:text-purple-400 disabled:text-gray-500 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <FiDownload />
+            {isDownloading ? "Downloading..." : "Download"}
+          </button>
           <button className="hover:text-purple-400">Add to Album</button>
-          <button className="text-red-400 hover:text-red-300">Delete</button>
+          <button 
+            onClick={handleBulkDelete}
+            disabled={isDeleting || deleteBulkMutation.isPending}
+            className="text-red-400 hover:text-red-300 disabled:text-gray-500 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <FiTrash2 />
+            {isDeleting || deleteBulkMutation?.isPending ? "Deleting..." : "Delete"}
+          </button>
         </motion.div>
       )}
     </div>

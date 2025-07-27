@@ -3,7 +3,7 @@ import PhotoLayout from "@/components/PhotoLayout";
 import { useCreateGroup, useGetGroups, useGetGroupImages } from "@/api/groups";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FiPlus, FiX, FiLoader, FiAlertTriangle } from "react-icons/fi";
+import { FiPlus, FiX, FiLoader, FiAlertTriangle, FiSearch } from "react-icons/fi";
 
 // Define the Group interface based on your API response
 interface Group {
@@ -37,7 +37,7 @@ const GroupPhotoLoader = ({ groupId }: { groupId: number }) => {
     );
   }
 
-  return <PhotoLayout photos={photos} groupId={groupId} />;
+  return <PhotoLayout photos={photos} groupId={groupId} deleteBulkMutation={()=>{}} deleteSingleMutation={()=>{}} />;
 };
 
 const Groups = () => {
@@ -45,6 +45,7 @@ const Groups = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupDescription, setNewGroupDescription] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
 
   const { data: groups, isLoading, isError, error } = useGetGroups();
   const createGroupMutation = useCreateGroup();
@@ -70,6 +71,10 @@ const Groups = () => {
       console.error("Failed to create group:", error);
     }
   };
+
+  const filteredGroups = groups?.filter((group: Group) =>
+    group.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   if (isLoading) {
     return (
@@ -102,28 +107,42 @@ const Groups = () => {
     <>
       <div className="min-h-screen flex flex-col md:flex-row bg-gradient-to-br from-gray-900 via-purple-900/30 to-indigo-900">
         {/* Groups List - Left Side */}
-        <div className="w-full md:w-1/3 lg:w-1/4 p-4 bg-gray-900/90 backdrop-blur-sm border-r border-gray-800">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-400">
-              Your Groups ({groups.length})
-            </h2>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setIsModalOpen(true)}
-              className="bg-purple-600 hover:bg-purple-700 text-white p-2 rounded-full"
-            >
-              <FiPlus />
-            </motion.button>
+        <div className="w-full md:w-1/3 lg:w-1/4 p-4 bg-gray-900/90 backdrop-blur-sm border-r border-gray-800 flex flex-col">
+          <div>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-400">
+                Your Groups ({groups.length})
+              </h2>
+            </div>
+            <div className="flex items-center space-x-2 mb-4">
+              <div className="relative flex-grow">
+                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search groups..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full bg-gray-800/50 rounded-md py-2 pl-10 pr-4 focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                />
+              </div>
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setIsModalOpen(true)}
+                className="bg-purple-600 hover:bg-purple-700 text-white p-2 rounded-full"
+              >
+                <FiPlus />
+              </motion.button>
+            </div>
           </div>
           <div
-            className="space-y-2 overflow-x-hidden overflow-y-auto max-h-[calc(100vh-200px)]"
+            className="flex-grow space-y-2 overflow-y-auto"
             style={{
               scrollbarWidth: 'thin',
               scrollbarColor: '#4a5568 #2d3748'
             }}
           >
-            {groups.map((group: Group) => (
+            {filteredGroups.map((group: Group) => (
               <motion.div
                 key={group.id}
                 whileHover={{ scale: 1.01 }}

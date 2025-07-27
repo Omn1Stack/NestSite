@@ -8,6 +8,7 @@ import {
   FiFolderPlus,
   FiTrash2,
   FiX,
+  FiEdit,
 } from "react-icons/fi";
 
 // Helper component for consistent menu items
@@ -72,6 +73,11 @@ export default function PortalMenu({
         </div>
 
         <div className="flex flex-col p-2">
+          <ActionButton
+            icon={<FiEdit />}
+            label="Edit"
+            onClick={() => onAction("edit", photoId)}
+          />
           <ActionButton
             icon={<FiDownload />}
             label="Download"

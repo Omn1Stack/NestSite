@@ -39,5 +39,8 @@ export const useUsersImages = () => {
   return useQuery<photoType[], Error>({
     queryKey: ["usersImages"],
     queryFn: getUsersImages,
+    staleTime: 0,               // Always consider data stale (forces refetch on invalidate)
+    refetchOnMount: true,       // Refetch when component remounts
+    refetchOnWindowFocus: true, // Refetch when tab becomes active again
   });
 };
