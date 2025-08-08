@@ -11,6 +11,7 @@ import {
   FiUpload,
   FiUsers,
 } from "react-icons/fi";
+import HeroImageStack from "./HeroImageStack";
 
 const HomePage = () => {
   return (
@@ -60,7 +61,7 @@ const HomePage = () => {
             </div>
           </motion.div>
 
-          {/* Floating Photo Grid Animation */}
+          {/* Floating Photo Grid Animation
           <motion.div
             className="mt-20 grid grid-cols-3 md:grid-cols-4 gap-4 max-w-4xl mx-auto"
             initial={{ opacity: 0 }}
@@ -86,7 +87,8 @@ const HomePage = () => {
                 />
               </motion.div>
             ))}
-          </motion.div>
+          </motion.div> */}
+          <HeroImageStack/>
         </div>
       </div>
 

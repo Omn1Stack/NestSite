@@ -1,9 +1,17 @@
 "use client";
 import PhotoLayout from "@/components/PhotoLayout";
-import { useCreateGroup, useGetGroups, useGetGroupImages } from "@/api/groups";
+import { useCreateGroup, useGetGroups, useGetGroupImages, deleteGroupPhoto, deleteMultipleGroupPhotos } from "@/api/groups";
+import { useUploadGroupImages } from "@/api/upload";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FiPlus, FiX, FiLoader, FiAlertTriangle, FiSearch } from "react-icons/fi";
+import { FiPlus, FiX, FiLoader, FiAlertTriangle, FiSearch, FiGrid } from "react-icons/fi";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "react-toastify";
+import { fetchImageBlob } from "@/api/images/images";
+import JSZip from "jszip";
+import { useRouter } from "next/navigation";
+import useIsDesktop from "@/hooks/useIsDesktop";
+import GroupListPanel from "@/components/GroupListPanel";
 
 // Define the Group interface based on your API response
 interface Group {
@@ -16,6 +24,172 @@ interface Group {
 
 const GroupPhotoLoader = ({ groupId }: { groupId: number }) => {
   const { data: photos, isLoading, isError, error } = useGetGroupImages(groupId);
+  const queryClient = useQueryClient();
+  const router = useRouter();
+
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const uploadMutation = useUploadGroupImages();
+
+  const deleteSingleMutationHook = useMutation({
+    mutationFn: async ({ photoId }: { photoId: number }) => {
+      await deleteGroupPhoto(photoId, groupId);
+    },
+    onSuccess: () => {
+      toast.success("Photo deleted successfully from group!");
+      queryClient.invalidateQueries({ queryKey: ["groupImages", groupId] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Failed to delete photo.");
+    },
+  });
+
+  const deleteBulkMutationHook = useMutation({
+    mutationFn: async ({ photoIds }: { photoIds: number[] }) => {
+      return await deleteMultipleGroupPhotos(photoIds, groupId);
+    },
+    onSuccess: (result) => {
+      if (result.success.length > 0) {
+        toast.success(
+          `Successfully deleted ${result.success.length} photo(s)!`
+        );
+      }
+      if (result.failed.length > 0) {
+        toast.error(`Failed to delete ${result.failed.length} photo(s).`);
+      }
+      queryClient.invalidateQueries({ queryKey: ["groupImages", groupId] });
+    },
+    onError: (error: Error) => {
+      toast.error(
+        error.message || "An unexpected error occurred during deletion."
+      );
+    },
+  });
+
+  const handleUpload = async (files: File[]) => {
+    if (files.length === 0) return;
+
+    toast.info(`Uploading ${files.length} file(s) to group...`);
+    try {
+      await uploadMutation.mutateAsync({ groupId, files });
+      toast.success("Upload successful!");
+    } catch (error) {
+      console.error("Upload failed:", error);
+      toast.error(error instanceof Error ? error.message : "Upload failed");
+    }
+  };
+
+  const handleSingleDelete = async (photoId: string) => {
+    const id = parseInt(photoId, 10);
+    setIsDeleting(true);
+    await deleteSingleMutationHook.mutateAsync({ photoId: id });
+    setIsDeleting(false);
+  };
+
+  const handleBulkDelete = async (photoIds: string[]) => {
+    if (photoIds.length === 0) {
+      toast.error("No photos selected for deletion.");
+      return;
+    }
+    setIsDeleting(true);
+    const ids = photoIds.map((id) => parseInt(id, 10));
+    await deleteBulkMutationHook.mutateAsync({ photoIds: ids });
+    setIsDeleting(false);
+  };
+
+  const handleSingleDownload = async (photoId: string) => {
+    setIsDownloading(true);
+    try {
+      toast.info("Preparing download...");
+      const photo = photos?.find((p: any) => p.id.toString() === photoId);
+      if (!photo) {
+        throw new Error(`Photo with ID ${photoId} not found.`);
+      }
+      const blob = await fetchImageBlob(photo.image_url);
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = photo.original_filename || `photo_${photoId}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+      toast.success("Download started!");
+    } catch (err) {
+      const error = err as Error;
+      console.error("Failed to download photo:", error);
+      toast.error(
+        error.message || "An error occurred while downloading the photo."
+      );
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleBulkDownload = async (photoIds: string[]) => {
+    const selectionCount = photoIds.length;
+    if (selectionCount === 0) {
+      toast.error("No photos selected for download.");
+      return;
+    }
+    setIsDownloading(true);
+    try {
+      if (selectionCount === 1) {
+        await handleSingleDownload(photoIds[0]);
+        return;
+      }
+      toast.info(`Preparing ${selectionCount} photos for download...`);
+      const zip = new JSZip();
+      const downloadPromises = photoIds.map((photoId) => {
+        const photo = photos?.find((p: any) => p.id.toString() === photoId);
+        if (photo) {
+          return fetchImageBlob(photo.image_url)
+            .then((blob) => {
+              const filename =
+                photo.original_filename || `photo_${photoId}.jpg`;
+              const sanitizedFilename = filename.replace(
+                /[<>:"/\\|?*]/g,
+                "_"
+              );
+              zip.file(sanitizedFilename, blob);
+            })
+            .catch((error) => {
+              console.error(`Failed to download photo ${photoId}:`, error);
+            });
+        }
+        return Promise.resolve();
+      });
+      await Promise.allSettled(downloadPromises);
+      const fileCount = Object.keys(zip.files).length;
+      if (fileCount === 0) {
+        throw new Error("No photos could be downloaded.");
+      }
+      toast.info("Creating zip file...");
+      const zipBlob = await zip.generateAsync({
+        type: "blob",
+        compression: "STORE",
+      });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(zipBlob);
+      link.download = `group_${groupId}_photos_${fileCount}items.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+      toast.success(`Successfully downloaded ${fileCount} photos!`);
+    } catch (err) {
+      const error = err as Error;
+      console.error("Bulk download failed:", error);
+      toast.error(
+        error.message || "An error occurred during the download process."
+      );
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleEdit = (photoId: string) => {
+    router.push(`/photo/${photoId}`);
+  };
 
   if (isLoading) {
     return (
@@ -37,16 +211,32 @@ const GroupPhotoLoader = ({ groupId }: { groupId: number }) => {
     );
   }
 
-  return <PhotoLayout photos={photos} groupId={groupId} deleteBulkMutation={()=>{}} deleteSingleMutation={()=>{}} />;
+  return (
+    <PhotoLayout
+      photos={photos?.map((p: any) => ({ ...p, id: p.id.toString() })) || []}
+      title={""} // Title is handled by the parent Groups component
+      onSingleDelete={handleSingleDelete}
+      onBulkDelete={handleBulkDelete}
+      onSingleDownload={handleSingleDownload}
+      onBulkDownload={handleBulkDownload}
+      onEdit={handleEdit}
+      onUpload={handleUpload}
+      isDeleting={isDeleting}
+      isDownloading={isDownloading}
+      isUploading={uploadMutation.isPending}
+    />
+  );
 };
 
 const Groups = () => {
   const [selectedGroup, setSelectedGroup] = useState<number | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupDescription, setNewGroupDescription] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
 
+  const isDesktop = useIsDesktop();
   const { data: groups, isLoading, isError, error } = useGetGroups();
   const createGroupMutation = useCreateGroup();
 
@@ -72,9 +262,17 @@ const Groups = () => {
     }
   };
 
+  const handleSelectGroup = (id: number) => {
+    setSelectedGroup(id);
+    setIsPanelOpen(false); // Close panel on selection
+  };
+
   const filteredGroups = groups?.filter((group: Group) =>
     group.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  ) || [];
+
+  const currentGroupName =
+    groups?.find((g: Group) => g.id === selectedGroup)?.name || "Select a Group";
 
   if (isLoading) {
     return (
@@ -94,7 +292,6 @@ const Groups = () => {
     );
   }
 
-  // Handle case where groups is undefined or not an array
   if (!groups || !Array.isArray(groups)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-purple-900/30 to-indigo-900">
@@ -105,107 +302,89 @@ const Groups = () => {
 
   return (
     <>
-      <div className="min-h-screen flex flex-col md:flex-row bg-gradient-to-br from-gray-900 via-purple-900/30 to-indigo-900">
-        {/* Groups List - Left Side */}
-        <div className="w-full md:w-1/3 lg:w-1/4 p-4 bg-gray-900/90 backdrop-blur-sm border-r border-gray-800 flex flex-col">
-          <div>
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-400">
-                Your Groups ({groups.length})
-              </h2>
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900/30 to-indigo-900">
+        {isDesktop ? (
+          // --- DESKTOP LAYOUT ---
+          <div className="flex h-screen">
+            <div className="w-1/3 lg:w-1/4">
+              <GroupListPanel
+                groups={filteredGroups}
+                selectedGroup={selectedGroup}
+                onSelectGroup={handleSelectGroup}
+                searchTerm={searchTerm}
+                onSearchChange={setSearchTerm}
+                onAddGroupClick={() => setIsModalOpen(true)}
+              />
             </div>
-            <div className="flex items-center space-x-2 mb-4">
-              <div className="relative flex-grow">
-                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search groups..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full bg-gray-800/50 rounded-md py-2 pl-10 pr-4 focus:ring-2 focus:ring-purple-500 focus:outline-none"
-                />
-              </div>
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setIsModalOpen(true)}
-                className="bg-purple-600 hover:bg-purple-700 text-white p-2 rounded-full"
-              >
-                <FiPlus />
-              </motion.button>
+            <div className="flex-1 p-4 md:p-6 overflow-y-auto">
+              {selectedGroup ? (
+                <GroupPhotoLoader groupId={selectedGroup} />
+              ) : (
+                <div className="h-full flex items-center justify-center text-gray-400/80 text-lg">
+                  Select a group to view photos
+                </div>
+              )}
             </div>
           </div>
-          <div
-            className="flex-grow space-y-2 overflow-y-auto"
-            style={{
-              scrollbarWidth: 'thin',
-              scrollbarColor: '#4a5568 #2d3748'
-            }}
-          >
-            {filteredGroups.map((group: Group) => (
-              <motion.div
-                key={group.id}
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-                onClick={() => setSelectedGroup(group.id)}
-                className={`p-4 rounded-xl cursor-pointer transition-all ${
-                  selectedGroup === group.id
-                    ? "bg-gradient-to-r from-purple-600/30 to-indigo-600/30 border border-purple-500/20 shadow-lg"
-                    : "hover:bg-gray-800/50"
-                }`}
-              >
-                <h3 className="font-semibold text-gray-100">{group.name}</h3>
-                {group.description && (
-                  <p className="text-sm text-gray-300/60 mt-1">
-                    {group.description}
-                  </p>
-                )}
-                <p className="text-sm text-purple-300/80 mt-2">
-                  {group.photocount || 0} photos
-                </p>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-
-        {/* Photos Grid - Right Side */}
-        <div className="flex-1 p-4 md:p-6">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-6"
-          >
-            <h2 className="text-3xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-              {groups.find((g: Group) => g.id === selectedGroup)?.name ||
-                "Select a Group"}
-            </h2>
-          </motion.div>
-
-          {selectedGroup ? (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.3 }}
-              className="rounded-2xl bg-gray-900/50 backdrop-blur-sm p-4 shadow-xl border border-gray-800/50"
+        ) : (
+          // --- MOBILE LAYOUT ---
+          <div className="relative h-screen overflow-hidden">
+            <div className="h-full overflow-y-auto">
+              {selectedGroup ? (
+                <GroupPhotoLoader groupId={selectedGroup} />
+              ) : (
+                <div className="h-full flex items-center justify-center text-gray-400/80 text-lg">
+                  Select a group to view photos
+                </div>
+              )}
+            </div>
+            
+            {/* Floating Action Button */}
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={() => setIsPanelOpen(true)}
+              className="fixed bottom-6 right-6 bg-purple-600 hover:bg-purple-700 text-white p-4 rounded-full shadow-lg z-40"
+              aria-label="Select Group"
             >
-              <GroupPhotoLoader groupId={selectedGroup} />
-            </motion.div>
-          ) : (
-            <div className="h-full flex items-center justify-center text-gray-400/80 text-lg">
-              <motion.div
-                animate={{ scale: [0.95, 1, 0.95] }}
-                transition={{ duration: 2, repeat: Infinity }}
-                className="text-center"
-              >
-                <div className="text-2xl mb-2">📸</div>
-                <div>Select a group to view photos</div>
-              </motion.div>
-            </div>
-          )}
-        </div>
+              <FiGrid size={24} />
+            </motion.button>
+
+            {/* Slide-over Panel */}
+            <AnimatePresence>
+              {isPanelOpen && (
+                <>
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    onClick={() => setIsPanelOpen(false)}
+                    className="fixed inset-0 bg-black/60 z-40"
+                  />
+                  <motion.div
+                    initial={{ x: "-100%" }}
+                    animate={{ x: 0 }}
+                    exit={{ x: "-100%" }}
+                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                    className="fixed top-0 left-0 h-full w-4/5 max-w-sm bg-gray-900 z-50"
+                  >
+                    <GroupListPanel
+                      groups={filteredGroups}
+                      selectedGroup={selectedGroup}
+                      onSelectGroup={handleSelectGroup}
+                      searchTerm={searchTerm}
+                      onSearchChange={setSearchTerm}
+                      onAddGroupClick={() => setIsModalOpen(true)}
+                    />
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
       </div>
 
-      {/* Create Group Modal */}
+      {/* Create Group Modal (works for both layouts) */}
       <AnimatePresence>
         {isModalOpen && (
           <motion.div

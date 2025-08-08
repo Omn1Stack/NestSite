@@ -2,6 +2,7 @@
 
 import React from "react";
 import PortalMenu from "@/components/PortalMenu";
+import { PhotoViewer } from "@/components/PhotoViewer"; // Import the fixed PhotoViewer
 import { motion } from "framer-motion";
 import Image from "next/image";
 import { useEffect, useState } from "react";
@@ -12,7 +13,7 @@ import {
   FiImage,
   FiList,
   FiMoreHorizontal,
- 
+  FiEye,
   FiSearch,
   FiUpload,
   FiDownload,
@@ -21,10 +22,10 @@ import {
 import { useUploadGroupImages } from "@/api/upload";
 import { useRouter } from "next/navigation";
 import { useDropzone } from "react-dropzone";
-import {  fetchImageBlob,} from "@/api/images/images";
+import { fetchImageBlob } from "@/api/images/images";
 import JSZip from "jszip";
 import { toast } from "react-toastify";
-import {  UseMutationResult,  } from "@tanstack/react-query";
+import { UseMutationResult } from "@tanstack/react-query";
 
 interface Photo {
   id: string;
@@ -40,17 +41,27 @@ interface PhotoLayoutProps {
   groupId?: number | null;
   title?: string;
   deleteSingleMutation: UseMutationResult<void, Error, { photoId: number; groupId?: number }, unknown>;
-
   deleteBulkMutation: UseMutationResult<
     { success: number[]; failed: Array<{ id: number; error: string }> },
     Error,
     { photoIds: number[]; groupId?: number },
     unknown
   >;
+  fetchNextPage?: () => void;
+  hasNextPage?: boolean;
+  isFetchingNextPage?: boolean;
 }
 
-
-const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title = "Your Photos" , deleteBulkMutation,deleteSingleMutation}) => {
+const PhotoLayout: React.FC<PhotoLayoutProps> = ({ 
+  photos = [], 
+  groupId, 
+  title = "Your Photos", 
+  deleteBulkMutation, 
+  deleteSingleMutation,
+  fetchNextPage,
+  hasNextPage,
+  isFetchingNextPage 
+}) => {
   const router = useRouter();
   
   const uploadMutation = useUploadGroupImages();
@@ -61,7 +72,11 @@ const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title =
   const [isDownloading, setIsDownloading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  
+  // PhotoViewer state
+  const [viewerPhoto, setViewerPhoto] = useState<Photo | null>(null);
+  const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
+  const [likedPhotos, setLikedPhotos] = useState<string[]>([]);
+  const [viewerDownloading, setViewerDownloading] = useState(false);
 
   const onDrop = (acceptedFiles: File[]) => {
     if (groupId) {
@@ -91,6 +106,106 @@ const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title =
   const toggleMobileMenu = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setActiveMenuPhoto((prev) => (prev === id ? null : id));
+  };
+
+  // Handle viewing a single photo in the PhotoViewer
+  const handleViewPhoto = (photoId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const photoIndex = photos.findIndex(p => p.id === photoId);
+    const photo = photos[photoIndex];
+    
+    if (photo && photoIndex !== -1) {
+      setViewerPhoto(photo);
+      setCurrentPhotoIndex(photoIndex);
+    }
+  };
+
+  // PhotoViewer handlers
+  const handleCloseViewer = () => {
+    setViewerPhoto(null);
+  };
+
+  const handleNextPhoto = () => {
+    if (currentPhotoIndex < photos.length - 1) {
+      const nextIndex = currentPhotoIndex + 1;
+      setCurrentPhotoIndex(nextIndex);
+      setViewerPhoto(photos[nextIndex]);
+    }
+  };
+
+  const handlePreviousPhoto = () => {
+    if (currentPhotoIndex > 0) {
+      const prevIndex = currentPhotoIndex - 1;
+      setCurrentPhotoIndex(prevIndex);
+      setViewerPhoto(photos[prevIndex]);
+    }
+  };
+
+  const handleViewerDownload = async () => {
+    if (!viewerPhoto) return;
+    
+    setViewerDownloading(true);
+    try {
+      const blob = await fetchImageBlob(viewerPhoto.image_url);
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = viewerPhoto.original_filename || `photo_${viewerPhoto.id}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+      toast.success("Download started!");
+    } catch (error) {
+      console.error("Failed to download photo:", error);
+      toast.error("Failed to download photo");
+    } finally {
+      setViewerDownloading(false);
+    }
+  };
+
+  const handleViewerLike = () => {
+    if (!viewerPhoto) return;
+    
+    setLikedPhotos(prev => 
+      prev.includes(viewerPhoto.id) 
+        ? prev.filter(id => id !== viewerPhoto.id)
+        : [...prev, viewerPhoto.id]
+    );
+  };
+
+  const handleViewerShare = () => {
+    if (!viewerPhoto) return;
+    
+    if (navigator.share) {
+      navigator.share({
+        title: viewerPhoto.alt || 'Photo',
+        url: viewerPhoto.image_url
+      });
+    } else {
+      navigator.clipboard.writeText(viewerPhoto.image_url);
+      toast.success("Photo URL copied to clipboard!");
+    }
+  };
+
+  const handleViewerDelete = async () => {
+    if (!viewerPhoto) return;
+    
+    const confirmed = window.confirm("Are you sure you want to delete this photo? This action cannot be undone.");
+    if (!confirmed) return;
+
+    try {
+      const id = parseInt(viewerPhoto.id);
+      await deleteSingleMutation.mutateAsync({ 
+        photoId: id, 
+        groupId: groupId || undefined 
+      });
+      
+      toast.success("Photo deleted successfully!");
+      handleCloseViewer(); // Close the viewer after deletion
+    } catch (error) {
+      console.error("Failed to delete photo:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to delete photo");
+    }
   };
 
   // Handle single photo deletion (mobile)
@@ -207,7 +322,7 @@ const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title =
 
   const handleEdit = () => {
     if (selectedPhotos.length === 1) {
-      router.push(`/photo/${selectedPhotos[0]}`);
+      router.push(`/edit/${selectedPhotos[0]}`);
     }
   };
 
@@ -359,7 +474,7 @@ const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title =
               <motion.div
                 key={photo.id}
                 whileHover={{ scale: 1.02 }}
-                className={`relative aspect-square rounded-xl overflow-hidden border-2 ${
+                className={`group relative aspect-square rounded-xl overflow-hidden border-2 ${
                   selectedPhotos.includes(photo.id)
                     ? "border-purple-500"
                     : "border-transparent"
@@ -373,6 +488,22 @@ const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title =
                   className="object-cover cursor-pointer"
                   sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, 20vw"
                 />
+                
+                {/* View Button - Shows on Hover (Top Left) */}
+                <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                  <motion.button
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    whileHover={{ scale: 1.1 }}
+                    className="bg-white/90 hover:bg-white text-gray-900 p-2 rounded-full shadow-lg transition-all opacity-0 group-hover:opacity-100"
+                    style={{ 
+                      animation: "fadeInScale 0.2s ease-out 0.1s both"
+                    }}
+                    onClick={(e) => handleViewPhoto(photo.id, e)}
+                  >
+                    <FiEye className="h-4 w-4" />
+                  </motion.button>
+                </div>
+
                 {!isDesktop && (
                   <div className="absolute top-1 right-1">
                     <button
@@ -408,7 +539,7 @@ const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title =
               <motion.div
                 key={photo.id}
                 whileHover={{ x: isDesktop ? 5 : 0 }}
-                className={`flex items-center gap-4 p-3 rounded-lg cursor-pointer ${
+                className={`group flex items-center gap-4 p-3 rounded-lg cursor-pointer ${
                   selectedPhotos.includes(photo.id)
                     ? "bg-purple-500/20"
                     : "bg-gray-800/50 hover:bg-gray-800"
@@ -422,6 +553,21 @@ const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title =
                     fill
                     className="object-cover"
                   />
+                  
+                  {/* View Button - Shows on Hover for List View (Top Left) */}
+                  <div className="absolute top-1 left-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                    <motion.button
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      whileHover={{ scale: 1.1 }}
+                      className="bg-white/90 hover:bg-white text-gray-900 p-1 rounded-full shadow-lg transition-all opacity-0 group-hover:opacity-100"
+                      style={{ 
+                        animation: "fadeInScale 0.2s ease-out 0.1s both"
+                      }}
+                      onClick={(e) => handleViewPhoto(photo.id, e)}
+                    >
+                      <FiEye className="h-2.5 w-2.5" />
+                    </motion.button>
+                  </div>
                 </div>
                 <div className="flex-grow">
                   <h3 className="font-medium">{photo.alt}</h3>
@@ -463,7 +609,7 @@ const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title =
               <motion.div
                 key={photo.id}
                 whileHover={{ scale: 1.02 }}
-                className={`relative break-inside-avoid rounded-xl overflow-hidden border-2 ${
+                className={`group relative break-inside-avoid rounded-xl overflow-hidden border-2 ${
                   selectedPhotos.includes(photo.id)
                     ? "border-purple-500"
                     : "border-transparent"
@@ -478,6 +624,22 @@ const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title =
                   className="w-full h-full object-cover cursor-pointer"
                   sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, 20vw"
                 />
+                
+                {/* View Button - Shows on Hover (Top Left) */}
+                <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                  <motion.button
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    whileHover={{ scale: 1.1 }}
+                    className="bg-white/90 hover:bg-white text-gray-900 p-2 rounded-full shadow-lg transition-all opacity-0 group-hover:opacity-100"
+                    style={{ 
+                      animation: "fadeInScale 0.2s ease-out 0.1s both"
+                    }}
+                    onClick={(e) => handleViewPhoto(photo.id, e)}
+                  >
+                    <FiEye className="h-4 w-4" />
+                  </motion.button>
+                </div>
+
                 {!isDesktop && (
                   <div className="absolute top-1 right-1">
                     <button
@@ -508,6 +670,19 @@ const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title =
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4 md:p-20">
+      <style jsx>{`
+        @keyframes fadeInScale {
+          0% {
+            opacity: 0;
+            transform: scale(0.8);
+          }
+          100% {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+      `}</style>
+      
       {/* PhotoLayout Header */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
@@ -597,6 +772,20 @@ const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title =
 
       {renderContent()}
 
+      {hasNextPage && (
+        <div className="mt-8 flex justify-center">
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => fetchNextPage && fetchNextPage()}
+            disabled={isFetchingNextPage}
+            className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 px-8 rounded-full text-lg transition-all disabled:opacity-50"
+          >
+            {isFetchingNextPage ? "Loading..." : "Load More"}
+          </motion.button>
+        </div>
+      )}
+
       {/* Portal Menu for Mobile */}
       {activeMenuPhoto && !isDesktop && (
         <PortalMenu
@@ -642,6 +831,25 @@ const PhotoLayout: React.FC<PhotoLayoutProps> = ({ photos = [], groupId, title =
             {isDeleting || deleteBulkMutation?.isPending ? "Deleting..." : "Delete"}
           </button>
         </motion.div>
+      )}
+
+      {/* PhotoViewer Component */}
+      {viewerPhoto && (
+        <PhotoViewer
+          photo={viewerPhoto}
+          allPhotosCount={photos.length}
+          currentIndex={currentPhotoIndex}
+          isLiked={likedPhotos.includes(viewerPhoto.id)}
+          isDownloading={viewerDownloading}
+          onClose={handleCloseViewer}
+          onNext={handleNextPhoto}
+          onPrevious={handlePreviousPhoto}
+          onDelete={handleViewerDelete}
+          onDownload={handleViewerDownload}
+          onShare={handleViewerShare}
+          onLike={handleViewerLike}
+          onEdit={()=>router.push(`/edit/${viewerPhoto.id}`)}
+        />
       )}
     </div>
   );

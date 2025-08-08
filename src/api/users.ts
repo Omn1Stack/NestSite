@@ -1,46 +1,33 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { photoType } from "@/types/photosType";
 
-const getUsersImages = async (): Promise<photoType[]> => {
-  const response = await fetch("http://127.0.0.1:8000/api/v1.0/get_users_images");
+const getImages = async ({ pageParam = 1, limit = 12 }): Promise<{ photos: photoType[], nextPage: number | null }> => {
+  const response = await fetch(`http://127.0.0.1:8000/api/v1.0/images?page=${pageParam}&limit=${limit}`);
 
   if (!response.ok) {
     throw new Error("Failed to fetch images");
   }
   
   const data = await response.json();
-  console.log("Fetched user images:", data); // This log is helpful for debugging
+  
+  const fetchedPhotos: photoType[] = data.photos.map((image: any) => ({
+    id: String(image.image_id),
+    image_url: image.image_url,
+    alt: image.original_filename,
+    date: image.upload_date,
+  }));
 
-  // The backend returns an array of user objects.
-  // Each user object has an 'images' array.
-  // Each image in that array needs to be transformed into our `photoType`.
-  const allPhotos: photoType[] = [];
-
-  data.forEach((user: any) => {
-    if (user.images && Array.isArray(user.images)) {
-      const userPhotos = user.images.map((image: any) => {
-        if (!image) return null; // Guard against null/undefined entries in the images array
-        return {
-          id: String(image.image_id), // Convert number to string for component consistency
-          image_url: image.image_url,
-          alt: image.original_filename,
-          date: image.upload_date,
-          // location and groupId are optional and not present in this API response
-        };
-      });
-      allPhotos.push(...userPhotos);
-    }
-  });
-
-  return allPhotos.filter(Boolean) as photoType[]; // Filter out any null entries
+  return {
+    photos: fetchedPhotos,
+    nextPage: fetchedPhotos.length === limit ? pageParam + 1 : null,
+  };
 };
 
-export const useUsersImages = () => {
-  return useQuery<photoType[], Error>({
-    queryKey: ["usersImages"],
-    queryFn: getUsersImages,
-    staleTime: 0,               // Always consider data stale (forces refetch on invalidate)
-    refetchOnMount: true,       // Refetch when component remounts
-    refetchOnWindowFocus: true, // Refetch when tab becomes active again
+export const useImages = (limit: number = 12) => {
+  return useInfiniteQuery<Awaited<ReturnType<typeof getImages>>, Error>({
+    queryKey: ["images", limit],
+    queryFn: ({ pageParam }) => getImages({ pageParam, limit }),
+    getNextPageParam: (lastPage) => lastPage.nextPage,
+    initialPageParam: 1,
   });
 };

@@ -4,6 +4,7 @@ import { PricingSection } from "@/components/PricingSection";
 import aifeatures from "@/types/Aifeaturestype";
 import { motion } from "framer-motion";
 import Image from "next/image";
+import Link from "next/link";
 import {
   FiPenTool,
   FiRepeat,
@@ -20,6 +21,7 @@ const AIToolsPage = () => {
       title: "Smart Enhancement",
       description:
         "Automatically improve lighting, colors, and sharpness with one click",
+      href: "/aitools/smartenhancement",
     },
     {
       icon: <FiSmile />,
@@ -78,16 +80,22 @@ const AIToolsPage = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.1 }}
-              className="bg-gray-800/50 hover:bg-gray-800/70 backdrop-blur-sm rounded-xl p-8 border border-gray-700/50 transition-all"
+              className="bg-gray-800/50 hover:bg-gray-800/70 backdrop-blur-sm rounded-xl p-8 border border-gray-700/50 transition-all flex flex-col"
             >
               <div className="text-purple-400 text-4xl mb-6">
                 {feature.icon}
               </div>
               <h3 className="text-xl font-bold mb-3">{feature.title}</h3>
-              <p className="text-gray-400">{feature.description}</p>
-              <button className="mt-6 text-purple-400 hover:text-purple-300 flex items-center">
-                Try Now <FiZap className="ml-2" />
-              </button>
+              <p className="text-gray-400 flex-grow">{feature.description}</p>
+              {feature.href ? (
+                <Link href={feature.href} className="mt-6 text-purple-400 hover:text-purple-300 flex items-center">
+                    Try Now <FiZap className="ml-2" />
+                </Link>
+              ) : (
+                <button className="mt-6 text-gray-500 flex items-center cursor-not-allowed">
+                  Coming Soon <FiZap className="ml-2" />
+                </button>
+              )}
             </motion.div>
           ))}
         </div>

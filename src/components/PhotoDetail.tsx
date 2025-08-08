@@ -2,20 +2,23 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { FiRotateCw, FiCrop, FiX, FiSave } from "react-icons/fi";
-import { getPhotoUrl, rotatePhoto, cropPhoto, replacePhoto, duplicatePhoto } from "@/api/images/images";
+import { FiRotateCw, FiCrop, FiX, FiSave, FiEdit3 } from "react-icons/fi";
+import { getPhotoUrl, rotatePhoto, cropPhoto, replacePhoto, duplicatePhoto, applyFilter } from "@/api/images/images";
 import ReactCrop, { type Crop, centerCrop, makeAspectCrop } from "react-image-crop";
 import "react-image-crop/dist/ReactCrop.css";
 import { useRouter } from "next/navigation";
 import { toast } from "react-toastify";
+import Spinner from "./Spinner";
 
 // --- Helper Components ---
-const EditSection = ({ title, children }: { title: string, children: React.ReactNode }) => (
-  <div className="p-4 bg-gray-800/50 rounded-lg">
-    <h3 className="text-sm font-semibold text-gray-400 mb-3">{title}</h3>
-    {children}
-  </div>
-);
+const EditSection = ({ title, children, disabled = false }: { title: string, children: React.ReactNode, disabled?: boolean }) => (
+    <div className={`p-4 bg-gray-800/50 rounded-lg transition-opacity ${disabled ? 'opacity-50' : ''}`}>
+      <h3 className="text-sm font-semibold text-gray-400 mb-3">{title}</h3>
+      <div style={{ pointerEvents: disabled ? 'none' : 'auto' }}>
+          {children}
+      </div>
+    </div>
+  );
 
 const ActionButton = ({
   icon,
@@ -60,6 +63,8 @@ const PhotoDetail = ({ photoId }: PhotoDetailProps) => {
   const [isCropping, setIsCropping] = useState(false);
   const [isRotating, setIsRotating] = useState(false);
   const [rotation, setRotation] = useState(0);
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
+  const [oilPaintRadius, setOilPaintRadius] = useState(10);
   const [hasChanges, setHasChanges] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
 
@@ -84,9 +89,8 @@ const PhotoDetail = ({ photoId }: PhotoDetailProps) => {
     setDisplayUrl(newUrl);
     setLastBlob(blob);
     setHasChanges(true);
-    setIsCropping(false);
-    setIsRotating(false);
-    setRotation(0);
+    // Exit all editing modes after applying an action
+    cancelEditing();
   };
 
   const handleMutationError = (error: Error) => {
@@ -104,6 +108,12 @@ const PhotoDetail = ({ photoId }: PhotoDetailProps) => {
       if (!imgRef.current) throw new Error("Image reference is not available");
       return cropPhoto(photoId, currentCrop, imgRef.current);
     },
+    onSuccess: handleMutationSuccess,
+    onError: handleMutationError,
+  });
+
+  const filterMutation = useMutation({
+    mutationFn: ({ filterName, params }: { filterName: string; params?: Record<string, any> }) => applyFilter(photoId, filterName, params),
     onSuccess: handleMutationSuccess,
     onError: handleMutationError,
   });
@@ -151,16 +161,29 @@ const PhotoDetail = ({ photoId }: PhotoDetailProps) => {
     if (isRotating) rotateMutation.mutate(rotation);
   };
 
+  const handleApplyFilter = (filterName: string) => {
+    let params = {};
+    if (filterName === 'oil') {
+      params = { radius: oilPaintRadius };
+    }
+    filterMutation.mutate({ filterName, params });
+  };
+
   const cancelEditing = () => {
     setIsCropping(false);
     setIsRotating(false);
+    setActiveFilter(null);
     setRotation(0);
   };
 
-  const isProcessing = isLoading || rotateMutation.isPending || cropMutation.isPending || replaceMutation.isPending || duplicateMutation.isPending;
-  const isEditing = isCropping || isRotating;
+  const isProcessing = isLoading || rotateMutation.isPending || cropMutation.isPending || filterMutation.isPending || replaceMutation.isPending || duplicateMutation.isPending;
+  const isEditing = isCropping || isRotating || !!activeFilter;
 
-  if (isLoading) return <div className="text-center p-10 pt-24">Loading image...</div>;
+  if (isLoading) return (
+    <div className="flex items-center justify-center min-h-screen">
+      <Spinner />
+    </div>
+  );
   if (isError) return <div className="text-center p-10 pt-24 text-red-500">Error: {error.message}</div>;
 
   return (
@@ -168,10 +191,11 @@ const PhotoDetail = ({ photoId }: PhotoDetailProps) => {
       <div className="container mx-auto px-4">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Image Display Area */}
-          <div className="lg:col-span-2 bg-black/20 rounded-lg flex items-center justify-center p-4 min-h-[60vh]">
+          <div className="lg:col-span-2 bg-black/20 rounded-lg flex items-center justify-center p-4 min-h-[60vh] relative">
             {isProcessing && (
-              <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80 z-10">
-                <p>Processing...</p>
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900/80 z-10">
+                <Spinner />
+                <p className="mt-4 text-lg">Applying edit...</p>
               </div>
             )}
             {originalImageUrl && (
@@ -207,34 +231,61 @@ const PhotoDetail = ({ photoId }: PhotoDetailProps) => {
                   />
                 </div>
               ) : (
-                <p className="text-sm text-gray-400">Apply a rotation or crop to enable saving.</p>
+                <p className="text-sm text-gray-400">Apply an edit to enable saving.</p>
               )}
             </div>
 
+            {/* Filters Section */}
+            <EditSection title="Filters" disabled={isProcessing || isCropping || isRotating}>
+              {activeFilter === null ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <ActionButton icon={<FiEdit3 />} label="Oil Paint" onClick={() => setActiveFilter('oil')} />
+                  <ActionButton icon={<FiEdit3 />} label="Charcoal" onClick={() => handleApplyFilter('charcoal')} />
+                  <ActionButton icon={<FiEdit3 />} label="Duotone" onClick={() => handleApplyFilter('duotone')} />
+                  <ActionButton icon={<FiEdit3 />} label="Sepia" onClick={() => handleApplyFilter('sepia')} />
+                  <ActionButton icon={<FiEdit3 />} label="Grayscale" onClick={() => handleApplyFilter('grayscale')} />
+                  <ActionButton icon={<FiEdit3 />} label="Sketch" onClick={() => handleApplyFilter('sketch')} />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {activeFilter === 'oil' && (
+                    <>
+                      <div className="flex justify-between items-center">
+                        <label htmlFor="oilPaintRadius" className="font-medium text-sm">Radius</label>
+                        <span className="text-purple-400 font-mono bg-gray-700 px-2 py-1 rounded-md text-sm">{oilPaintRadius}</span>
+                      </div>
+                      <input id="oilPaintRadius" type="range" min="1" max="20" value={oilPaintRadius} onChange={(e) => setOilPaintRadius(parseInt(e.target.value, 10))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer" />
+                    </>
+                  )}
+                  <ActionButton icon={<FiEdit3 />} label={`Apply ${activeFilter.charAt(0).toUpperCase() + activeFilter.slice(1)}`} onClick={() => handleApplyFilter(activeFilter)} />
+                </div>
+              )}
+            </EditSection>
+
             {/* Rotate Section */}
-            <EditSection title="Rotate">
+            <EditSection title="Rotate" disabled={isProcessing || isCropping || !!activeFilter}>
               {!isRotating ? (
-                <ActionButton icon={<FiRotateCw />} label="Rotate" onClick={() => { setIsRotating(true); setIsCropping(false); }} disabled={isProcessing || isEditing} />
+                <ActionButton icon={<FiRotateCw />} label="Rotate" onClick={() => setIsRotating(true)} />
               ) : (
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
                     <label htmlFor="rotation" className="font-medium text-sm">Angle</label>
                     <span className="text-purple-400 font-mono bg-gray-700 px-2 py-1 rounded-md text-sm">{rotation}°</span>
                   </div>
-                  <input id="rotation" type="range" min="-180" max="180" value={rotation} onChange={(e) => setRotation(parseInt(e.target.value, 10))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer" disabled={isProcessing} />
-                  <ActionButton icon={<FiRotateCw />} label="Apply Rotation" onClick={handleApplyRotation} disabled={isProcessing || rotation === 0} />
+                  <input id="rotation" type="range" min="-180" max="180" value={rotation} onChange={(e) => setRotation(parseInt(e.target.value, 10))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer" />
+                  <ActionButton icon={<FiRotateCw />} label="Apply Rotation" onClick={handleApplyRotation} disabled={rotation === 0} />
                 </div>
               )}
             </EditSection>
 
             {/* Crop Section */}
-            <EditSection title="Crop">
+            <EditSection title="Crop" disabled={isProcessing || isRotating || !!activeFilter}>
               {!isCropping ? (
-                <ActionButton icon={<FiCrop />} label="Crop" onClick={() => { setIsCropping(true); setIsRotating(false); }} disabled={isProcessing || isEditing} />
+                <ActionButton icon={<FiCrop />} label="Crop" onClick={() => setIsCropping(true)} />
               ) : (
                 <div className="space-y-4">
                     <p className="text-xs text-gray-400">Adjust the selection on the image.</p>
-                    <ActionButton icon={<FiCrop />} label="Apply Crop" onClick={handleApplyCrop} disabled={isProcessing || !crop?.width || !crop?.height} />
+                    <ActionButton icon={<FiCrop />} label="Apply Crop" onClick={handleApplyCrop} disabled={!crop?.width || !crop?.height} />
                 </div>
               )}
             </EditSection>

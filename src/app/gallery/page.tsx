@@ -1,14 +1,16 @@
 "use client";
 
 import PhotoLayout from '@/components/PhotoLayout';
-import { useUsersImages } from '@/api/users';
+import { useImages } from '@/api/images/images';
 import React from 'react';
 import { FiLoader, FiAlertTriangle } from 'react-icons/fi';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { deleteGroupPhoto, deleteMultiplePhotos, deletePhoto } from '@/api/images/images';
 
 const Gallery = () => {
-  const { data: photos, isLoading, isError, error } = useUsersImages();
+  // TODO: Replace with dynamic user ID
+  const currentUserId = 1;
+  const { data, isLoading, isError, error, fetchNextPage, hasNextPage, isFetchingNextPage } = useImages(currentUserId);
   const queryClient = useQueryClient();
 
   // --- Mutation for single delete ---
@@ -21,7 +23,7 @@ const Gallery = () => {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['usersImages'] });
+      queryClient.invalidateQueries({ queryKey: ['images', currentUserId] });
     },
   });
 
@@ -31,11 +33,9 @@ const Gallery = () => {
       return await deleteMultiplePhotos(photoIds, groupId);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['usersImages'] });
+      queryClient.invalidateQueries({ queryKey: ['images', currentUserId] });
     },
   });
-
-  
 
   if (isLoading) {
     return (
@@ -55,13 +55,19 @@ const Gallery = () => {
     );
   }
 
+  // Extract photos from infinite query pages
+  const photos = data?.pages?.flatMap(page => page.photos) || [];
+
   return (
     <PhotoLayout
-      photos={photos || []}
+      photos={photos}
       title="Gallery"
       groupId={null}
       deleteSingleMutation={deleteSingleMutationHook}
       deleteBulkMutation={deleteBulkMutationHook}
+      fetchNextPage={fetchNextPage}
+      hasNextPage={hasNextPage}
+      isFetchingNextPage={isFetchingNextPage}
     />
   );
 };

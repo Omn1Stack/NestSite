@@ -1,8 +1,45 @@
 import { Crop } from "react-image-crop";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { photoType } from "@/types/photosType";
 
 const API_BASE_URL = "http://127.0.0.1:8000/api/v1.0";
 
-// --- Existing API Functions ---
+
+
+const getImages = async ({ user_id, pageParam = 1, limit = 12 }): Promise<{ photos: photoType[], nextPage: number | null }> => {
+  const response = await fetch(`${API_BASE_URL}/images/by_user/${user_id}?page=${pageParam}&limit=${limit}`);
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch images");
+  }
+  
+  const data = await response.json();
+  
+  const fetchedPhotos: photoType[] = data.photos.map((image: any) => ({
+    id: String(image.image_id),
+    image_url: image.image_url,
+    alt: image.original_filename,
+    date: image.upload_date,
+  }));
+
+  return {
+    photos: fetchedPhotos,
+    nextPage: fetchedPhotos.length === limit ? pageParam + 1 : null,
+  };
+};
+
+export const useImages = (user_id: number, limit: number = 12) => {
+  return useInfiniteQuery<Awaited<ReturnType<typeof getImages>>, Error>({
+    queryKey: ["images", user_id, limit],
+    queryFn: ({ pageParam }) => getImages({ user_id, pageParam, limit }),
+    getNextPageParam: (lastPage) => lastPage.nextPage,
+    initialPageParam: 1,
+    enabled: !!user_id, // Only run the query if user_id is available
+  });
+};
+
+
+
 
 export const getPhotoUrl = async (photoId: number): Promise<{ url: string }> => {
   const res = await fetch(`${API_BASE_URL}/images/${photoId}`);
@@ -116,6 +153,27 @@ export const cropPhoto = async (
     const errorData = await res
       .json()
       .catch(() => ({ detail: "Failed to crop image" }));
+    throw new Error(errorData.detail);
+  }
+  return res.blob();
+};
+
+export const applyFilter = async (
+  photoId: number,
+  filterName: string,
+  params: Record<string, any> = {}
+): Promise<Blob> => {
+  const res = await fetch(`${API_BASE_URL}/images/${photoId}/filter/${filterName}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errorData = await res
+      .json()
+      .catch(() => ({ detail: `Failed to apply ${filterName} filter` }));
     throw new Error(errorData.detail);
   }
   return res.blob();

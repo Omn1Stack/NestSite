@@ -105,3 +105,55 @@ export const useGetGroupImages = (groupId: number | null) => {
     enabled: !!groupId, // Only run the query if a groupId is selected
   });
 };
+
+export const deleteGroupPhoto = async (photoId: number, groupId: number): Promise<void> => {
+  const res = await fetch(`${API_URL}/delete_group_file/${groupId}/${photoId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const errorData = await res
+      .json()
+      .catch(() => ({ detail: "Failed to delete group image" }));
+    throw new Error(errorData.detail || `Failed to delete photo ${photoId} from group ${groupId}`);
+  }
+};
+
+export const deleteMultipleGroupPhotos = async (
+  photoIds: number[],
+  groupId: number
+): Promise<{ success: number[], failed: Array<{ id: number, error: string }> }> => {
+  const results = {
+    success: [] as number[],
+    failed: [] as Array<{ id: number, error: string }>
+  };
+
+  const deletePromises = photoIds.map(async (photoId) => {
+    try {
+      await deleteGroupPhoto(photoId, groupId);
+      results.success.push(photoId);
+      return { status: 'fulfilled', photoId };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      results.failed.push({ id: photoId, error: errorMessage });
+      return { status: 'rejected', photoId, error: errorMessage };
+    }
+  });
+
+  await Promise.allSettled(deletePromises);
+  return results;
+};
+
+export interface DeletePhotoParams {
+  photoId: number;
+  groupId: number;
+}
+
+export interface BulkDeleteParams {
+  photoIds: number[];
+  groupId: number;
+}
+
+export interface DeleteResult {
+  success: number[];
+  failed: Array<{ id: number, error: string }>;
+}

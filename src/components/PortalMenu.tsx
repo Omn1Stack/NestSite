@@ -40,10 +40,14 @@ export default function PortalMenu({
   photoId,
   onClose,
   onAction,
+  showEdit = true,
+  showDelete = true,
 }: {
   photoId: string;
   onClose: () => void;
   onAction: (action: string, id: string) => void;
+  showEdit?: boolean;
+  showDelete?: boolean;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -73,11 +77,13 @@ export default function PortalMenu({
         </div>
 
         <div className="flex flex-col p-2">
-          <ActionButton
-            icon={<FiEdit />}
-            label="Edit"
-            onClick={() => onAction("edit", photoId)}
-          />
+          {showEdit && (
+            <ActionButton
+              icon={<FiEdit />}
+              label="Edit"
+              onClick={() => onAction("edit", photoId)}
+            />
+          )}
           <ActionButton
             icon={<FiDownload />}
             label="Download"
@@ -93,12 +99,14 @@ export default function PortalMenu({
             label="Add to Album"
             onClick={() => onAction("add-to-album", photoId)}
           />
-          <ActionButton
-            icon={<FiTrash2 />}
-            label="Delete"
-            danger
-            onClick={() => onAction("delete", photoId)}
-          />
+          {showDelete && (
+            <ActionButton
+              icon={<FiTrash2 />}
+              label="Delete"
+              danger
+              onClick={() => onAction("delete", photoId)}
+            />
+          )}
         </div>
       </div>
     </div>,

@@ -1,46 +1,14 @@
 "use client";
+import { useUploadUserImages } from "@/api/upload";
 import React, { useState, useCallback} from "react";
 import { useDropzone } from "react-dropzone";
 import { motion } from "framer-motion";
 import { FiUploadCloud, FiX, FiCheckCircle, FiImage, FiAlertCircle } from "react-icons/fi";
-import { useMutation } from "@tanstack/react-query";
-
-// NOTE: Replace with actual user ID from auth context
-const UPLOADER_ID = 1;
-
-const uploadFiles = async (files: File[]) => {
-  const formData = new FormData();
-  files.forEach((file) => {
-    formData.append("files", file);
-  });
-  formData.append("uploader_id", String(UPLOADER_ID));
-
-
-  const response = await fetch("http://127.0.0.1:8000/api/v1.0/upload_file", {
-    method: "POST",
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.detail || "File upload failed");
-  }
-
-  return response.json();
-};
-
+import { toast } from "react-toastify";
 
 const Upload = () => {
   const [files, setFiles] = useState<File[]>([]);
-
-  const { mutate: upload, isPending: isLoading, isSuccess, isError, error } = useMutation({
-    mutationFn: uploadFiles,
-    onSuccess: () => {
-      setTimeout(() => {
-        setFiles([]);
-      }, 2000);
-    }
-  });
+  const { mutate: upload, isPending: isLoading, isSuccess, isError, error } = useUploadUserImages();
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFiles((prev) => [...prev, ...acceptedFiles]);
@@ -56,9 +24,24 @@ const Upload = () => {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     if (files.length > 0) {
-      upload(files);
+      toast.info(`Uploading ${files.length} file(s)...`);
+      try {
+        await upload(files, {
+          onSuccess: () => {
+            toast.success("Upload successful!");
+            setFiles([]);
+          },
+          onError: (err) => {
+            toast.error(err instanceof Error ? err.message : "Upload failed");
+          }
+        });
+      } catch (err) {
+        // This catch block might be redundant if onError is handled, but good for safety
+        console.error("Upload failed:", err);
+        toast.error(err instanceof Error ? err.message : "An unexpected error occurred");
+      }
     }
   };
 
